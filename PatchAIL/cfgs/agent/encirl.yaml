@@ -21,8 +21,8 @@ bc_weight_type: ${bc_weight_type}
 bc_weight_schedule: ${bc_weight_schedule}
 reward_type: ${reward_type}
 disc_type: 'encoder'
-state_trans: false
+state_trans: true
 reward_scale: ${reward_scale}
-share_encoder: false
+share_encoder: true
 eta: 0
 mix_td: true

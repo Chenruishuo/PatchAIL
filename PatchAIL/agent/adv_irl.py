@@ -494,7 +494,7 @@ class DACAgent:
         else:
             obs, action, reward, discount, next_obs = utils.to_torch(
                         next(replay_iter), self.device)
-        reward = self.dac_rewarder(obs, action, clip=True)
+        # reward = self.dac_rewarder(obs, action, clip=True)
         
         # reward = torch.from_numpy(self.dac_rewarder(obs, action, next_obses=next_obs)).to(self.device).unsqueeze(1)
 
@@ -503,7 +503,7 @@ class DACAgent:
 
         expert_obs, expert_action, expert_next_obs = utils.to_torch(next(expert_replay_iter),
                                                    self.device)
-        expert_reward = self.dac_rewarder(expert_obs, expert_action, clip=True)
+        expert_reward = self.dac_rewarder(expert_obs, expert_action)
 
         initial_obs, initial_action, initial_next_obs = utils.to_torch(next(initial_iter),
                                                    self.device)
@@ -621,15 +621,15 @@ class DACAgent:
                     if self.target_enc:
                         next_obs = self.encoder_target(next_obs)
                         expert_obs = self.encoder_target(expert_obs)
-                        # expert_next_obs = self.encoder(expert_next_obs)
+                        expert_next_obs = self.encoder(expert_next_obs)
                         initial_obs = self.encoder_target(initial_obs)
-                        # initial_next_obs = self.encoder(initial_next_obs)
+                        initial_next_obs = self.encoder(initial_next_obs)
                     else:
                         next_obs = self.encoder(next_obs)
                         expert_obs = self.encoder(expert_obs)
-                        # expert_next_obs = self.encoder(expert_next_obs)
+                        expert_next_obs = self.encoder(expert_next_obs)
                         initial_obs = self.encoder(initial_obs)
-                        # initial_next_obs = self.encoder(initial_next_obs)
+                        initial_next_obs = self.encoder(initial_next_obs)
                 if "weighted_feature" in self.disc_type:
                     obs, _ = obs
                     next_obs, _ = next_obs
