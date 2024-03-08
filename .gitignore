@@ -1,0 +1,8 @@
+exp_local/*
+bc_weights/*
+weights/*
+expert_demos/*
+baseline/*
+expert_data/*
+results/*
+__pycache__/
