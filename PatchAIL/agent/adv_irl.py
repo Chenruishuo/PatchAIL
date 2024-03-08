@@ -620,12 +620,16 @@ class DACAgent:
                 with torch.no_grad():
                     if self.target_enc:
                         next_obs = self.encoder_target(next_obs)
+                        expert_obs = self.encoder_target(expert_obs)
+                        # expert_next_obs = self.encoder(expert_next_obs)
+                        initial_obs = self.encoder_target(initial_obs)
+                        # initial_next_obs = self.encoder(initial_next_obs)
                     else:
                         next_obs = self.encoder(next_obs)
-                    expert_obs = self.encoder(expert_obs)
-                    # expert_next_obs = self.encoder(expert_next_obs)
-                    initial_obs = self.encoder(initial_obs)
-                    # initial_next_obs = self.encoder(initial_next_obs)
+                        expert_obs = self.encoder(expert_obs)
+                        # expert_next_obs = self.encoder(expert_next_obs)
+                        initial_obs = self.encoder(initial_obs)
+                        # initial_next_obs = self.encoder(initial_next_obs)
                 if "weighted_feature" in self.disc_type:
                     obs, _ = obs
                     next_obs, _ = next_obs

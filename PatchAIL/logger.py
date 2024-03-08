@@ -27,7 +27,8 @@ COMMON_TRAIN_FORMAT = [('frame', 'F', 'int'), ('step', 'S', 'int'),
                        ('episode_reward', 'R', 'float'),
                        ('imitation_reward', 'R_i', 'float'),
                        ('buffer_size', 'BS', 'int'), ('fps', 'FPS', 'float'),
-                       ('total_time', 'T', 'time'),('initial_buffer_size', 'IBS', 'int')]
+                       ('total_time', 'T', 'time'),('initial_buffer_size', 'IBS', 'int'),
+                       ('seed', 'Seed','int')]
 COMMON_EVAL_FORMAT = [('frame', 'F', 'int'), ('step', 'S', 'int'),
                       ('episode', 'E', 'int'), ('episode_length', 'L', 'int'),
                       ('episode_reward', 'R', 'float'),

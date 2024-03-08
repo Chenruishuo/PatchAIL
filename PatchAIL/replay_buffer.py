@@ -523,10 +523,10 @@ class InitialBuffer(IterableDataset):
         while True:
             yield self._sample()
 
-def make_initial_loader(initialbuffer, batch_size):
+def make_initial_loader(initialbuffer, batch_size, initial_buffer_num_workers):
     loader = torch.utils.data.DataLoader(initialbuffer,
                                          batch_size=batch_size,
-                                         num_workers=2,
+                                         num_workers=initial_buffer_num_workers,
                                          pin_memory=True,
                                          worker_init_fn=_worker_init_fn)
     return loader

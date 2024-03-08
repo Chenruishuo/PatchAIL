@@ -143,7 +143,8 @@ class WorkspaceIL:
         
         self.initial_buffer = InitialBuffer(
                 self.cfg.expert_dataset, self.cfg.num_demos, self.cfg.obs_type, self.cfg.nstep)
-        self.initial_loader = make_initial_loader(self.initial_buffer, self.cfg.batch_size)
+        self.initial_loader = make_initial_loader(self.initial_buffer, self.cfg.batch_size,
+                                                  self.cfg.initial_buffer_num_workers)
 
         self._replay_iter = None
         self.expert_replay_iter = None
@@ -322,6 +323,7 @@ class WorkspaceIL:
                         log('episode', self.global_episode)
                         log('buffer_size', len(self.replay_storage))
                         log('initial_buffer_size', self.initial_buffer.size())
+                        log('seed',self.cfg.seed)
                         log('step', self.global_step)
                         if repr(self.agent) == 'potil' or repr(self.agent) == 'dac' and not self.use_gt_rew:
                                 log('expert_reward', self.expert_reward)
