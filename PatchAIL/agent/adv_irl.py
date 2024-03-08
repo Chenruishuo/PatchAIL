@@ -68,7 +68,7 @@ class DACAgent:
     def __init__(self, obs_shape, action_shape, device, lr, feature_dim,
                  hidden_dim, critic_target_tau, num_expl_steps,
                  update_every_steps, stddev_schedule, stddev_clip, use_tb,
-                 augment, use_actions, suite_name, obs_type, bc_weight_type, bc_weight_schedule, eta,
+                 augment, use_actions, suite_name, obs_type, bc_weight_type, bc_weight_schedule, eta, mix_td,
                  n_actions=None, reward_type="airl", disc_type="encoder", reward_aggr="mean", sim_type="weight",
                  share_encoder=True, state_trans=False, disc_final_iid=False,  disc_aug="random_shift",
                  reward_scale=1.0, grad_pen_weight=10.0, target_disc=False, disc_target_tau=0.05, disc_lr=None,
@@ -76,6 +76,7 @@ class DACAgent:
         self.device = device
         self.lr = lr
         self._eta = eta
+        self.mix_td = mix_td
         self.critic_target_tau = critic_target_tau
         self.disc_target_tau = disc_target_tau
         self.enc_target_tau = enc_target_tau
@@ -310,9 +311,14 @@ class DACAgent:
 
         return np.absolute((target_Q - Q).detach().cpu().numpy())
 
-    def update_discrete_critic(self, obs, action, initial_obs, initial_action, reward, discount, next_obs, initial_next_obs, bc_regularize, step, expert_obs, expert_act, **kwargs):
+    def update_discrete_critic(self, obs, action, initial_obs, initial_action, reward, expert_reward, discount, next_obs, initial_next_obs, bc_regularize, step, expert_obs, expert_action, expert_next_obs, **kwargs):
         metrics = dict()
-
+        half_batch_size = obs.shape[0]//2
+        if self.mix_td:
+            obs = torch.cat([obs[:half_batch_size],expert_obs[:half_batch_size]],dim=0)
+            action = torch.cat([action[:half_batch_size], expert_action[:half_batch_size]],dim=0)
+            next_obs = torch.cat([next_obs[:half_batch_size],expert_next_obs[:half_batch_size]],dim=0)
+            reward = torch.cat((reward[:half_batch_size], expert_reward[:half_batch_size]),dim=0)
         with torch.no_grad():
             dist = self.critic(next_obs)
             next_action = dist.argmax(dim=-1)
@@ -340,19 +346,16 @@ class DACAgent:
         bc_loss = 0.0
         if bc_regularize:
             logit_bc = self.critic(expert_obs)
-            bc_loss = nn.CrossEntropyLoss()(logit_bc, expert_act)
+            bc_loss = nn.CrossEntropyLoss()(logit_bc, expert_action)
         
-        initial_dist = self.critic(initial_obs)
-        initial_softmax = F.softmax(initial_dist, dim=-1)
-        expert_dist = self.critic(expert_obs)
-        expert_softmax = F.softmax(expert_dist, dim=-1)
+        obs_to_max = torch.cat([initial_obs[:half_batch_size], expert_obs[:half_batch_size]],dim=0)
+        dist_to_max = self.critic(obs_to_max)
+        softmax_to_max = F.softmax(dist_to_max, dim=-1)
         with torch.no_grad():
-            initial_pi_action = torch.multinomial(initial_softmax, 1)
-            expert_pi_action = torch.multinomial(expert_softmax, 1)
-        initial_pi_q = torch.gather(initial_softmax, -1, initial_pi_action)
-        expert_pi_q = torch.gather(expert_softmax, -1, expert_pi_action)
+            pi_action_to_max = torch.multinomial(softmax_to_max, 1)
+        pi_q_to_max = torch.gather(softmax_to_max, -1, pi_action_to_max)
 
-        delta_Q = -(initial_pi_q+expert_pi_q)/2
+        delta_Q = -pi_q_to_max
         critic_loss = (is_weights * F.mse_loss(Q, target_Q, reduction='none')).mean()*(1-bc_weight) - bc_loss*bc_weight*0.03
 
         optimistic_loss = self._eta * delta_Q.mean()
@@ -491,7 +494,7 @@ class DACAgent:
         else:
             obs, action, reward, discount, next_obs = utils.to_torch(
                         next(replay_iter), self.device)
-        
+        reward = self.dac_rewarder(obs, action)
         
         # reward = torch.from_numpy(self.dac_rewarder(obs, action, next_obses=next_obs)).to(self.device).unsqueeze(1)
 
@@ -500,7 +503,8 @@ class DACAgent:
 
         expert_obs, expert_action, expert_next_obs = utils.to_torch(next(expert_replay_iter),
                                                    self.device)
-        
+        expert_reward = self.dac_rewarder(expert_obs, expert_action)
+
         initial_obs, initial_action, initial_next_obs = utils.to_torch(next(initial_iter),
                                                    self.device)
 
@@ -608,7 +612,9 @@ class DACAgent:
                 obs = disc_obs
                 next_obs = disc_next_obs
                 expert_obs = disc_expert_obs
+                expert_next_obs = disc_expert_next_obs
                 initial_obs = disc_initial_obs
+                initial_next_obs = disc_initial_next_obs
             else:
                 obs = self.encoder(obs)
                 with torch.no_grad():
@@ -639,8 +645,10 @@ class DACAgent:
         
         if self.sim_type == "weight":
             new_rew = similarity * reward
+            new_exp_rew = similarity * expert_reward
         elif self.sim_type == "bonus":
             new_rew = similarity + reward
+            new_exp_rew = similarity + expert_reward
         else:
             raise NotImplementedError
 
@@ -648,10 +656,10 @@ class DACAgent:
             # update critic
             if self.use_per:
                 metrics.update(
-                    self.update_discrete_critic(obs, action, initial_obs, initial_action, new_rew, discount, next_obs, initial_next_obs, tree_indices=tree_idx, is_weights=is_weight, bc_regularize=bc_regularize, step=step, expert_obs=expert_obs, expert_act=expert_action))
+                    self.update_discrete_critic(obs, action, initial_obs, initial_action, new_rew, new_exp_rew, discount, next_obs, initial_next_obs, tree_indices=tree_idx, is_weights=is_weight, bc_regularize=bc_regularize, step=step, expert_obs=expert_obs, expert_action=expert_action, expert_next_obs=expert_next_obs))
             else:
                 metrics.update(
-                    self.update_discrete_critic(obs, action, initial_obs, initial_action, new_rew, discount, next_obs, initial_next_obs, bc_regularize=bc_regularize, step=step, expert_obs=expert_obs, expert_act=expert_action))
+                    self.update_discrete_critic(obs, action, initial_obs, initial_action, new_rew, new_exp_rew, discount, next_obs, initial_next_obs, bc_regularize=bc_regularize, step=step, expert_obs=expert_obs, expert_action=expert_action, expert_next_obs=expert_next_obs))
         
         else:
             # update critic
@@ -761,7 +769,7 @@ class DACAgent:
                 raise NotImplementedError
             if clip:
                 reward = torch.clamp(reward, min=-10, max=10)
-            return self.reward_scale * reward.flatten().detach().cpu().numpy()
+            return self.reward_scale * reward
 
     def update_discriminator(self, policy_obs, policy_action, expert_obs,
                              expert_action, policy_next_obs=None, expert_next_obs=None):

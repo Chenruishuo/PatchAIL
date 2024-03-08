@@ -5,7 +5,7 @@ defaults:
   - override hydra/launcher: submitit_local
 
 # Root Dir
-root_dir: '/home/ubuntu/zhangzhilong/crs/PatchAIL'
+root_dir: '/home/ubuntu/duxinghao/crs/PatchAIL'
 
 # replay buffer
 replay_buffer_size: 1000000 # 150000
@@ -24,7 +24,7 @@ record_video: false
 # experiment
 obs_type: 'pixels' # pixels, features
 reward_type: 'airl' # airl, gail, gail2
-experiment: ${suite.name}_${obs_type}_${task_name}/${algo_name}_rewscale_${reward_scale}_numtraj_${num_demos}/eta=${agent.eta}/seed=${seed}/
+experiment: ${suite.name}_${obs_type}_${task_name}/${algo_name}_rewscale_${reward_scale}_numtraj_${num_demos}/eta=${agent.eta}&mix_td/seed=${seed}/
 
 # expert dataset
 num_demos: 10 #50(openaigym), 10(dmc), 1(metaworld), 1(particle), 1(robotgym)
