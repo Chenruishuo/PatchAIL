@@ -68,13 +68,14 @@ class DACAgent:
     def __init__(self, obs_shape, action_shape, device, lr, feature_dim,
                  hidden_dim, critic_target_tau, num_expl_steps,
                  update_every_steps, stddev_schedule, stddev_clip, use_tb,
-                 augment, use_actions, suite_name, obs_type, bc_weight_type, bc_weight_schedule,
+                 augment, use_actions, suite_name, obs_type, bc_weight_type, bc_weight_schedule, eta,
                  n_actions=None, reward_type="airl", disc_type="encoder", reward_aggr="mean", sim_type="weight",
                  share_encoder=True, state_trans=False, disc_final_iid=False,  disc_aug="random_shift",
                  reward_scale=1.0, grad_pen_weight=10.0, target_disc=False, disc_target_tau=0.05, disc_lr=None,
                  target_enc=False, enc_target_tau=0.05, init_bc_weight=0.933, use_simreg=False, sim_rate=1.5, use_per=False):
         self.device = device
         self.lr = lr
+        self._eta = eta
         self.critic_target_tau = critic_target_tau
         self.disc_target_tau = disc_target_tau
         self.enc_target_tau = enc_target_tau
@@ -309,7 +310,7 @@ class DACAgent:
 
         return np.absolute((target_Q - Q).detach().cpu().numpy())
 
-    def update_discrete_critic(self, obs, action, reward, discount, next_obs, bc_regularize, step, expert_obs, expert_act, **kwargs):
+    def update_discrete_critic(self, obs, action, initial_obs, initial_action, reward, discount, next_obs, initial_next_obs, bc_regularize, step, expert_obs, expert_act, **kwargs):
         metrics = dict()
 
         with torch.no_grad():
@@ -341,12 +342,28 @@ class DACAgent:
             logit_bc = self.critic(expert_obs)
             bc_loss = nn.CrossEntropyLoss()(logit_bc, expert_act)
         
+        initial_dist = self.critic(initial_obs)
+        initial_softmax = F.softmax(initial_dist, dim=-1)
+        expert_dist = self.critic(expert_obs)
+        expert_softmax = F.softmax(expert_dist, dim=-1)
+        with torch.no_grad():
+            initial_pi_action = torch.multinomial(initial_softmax, 1)
+            expert_pi_action = torch.multinomial(expert_softmax, 1)
+        initial_pi_q = torch.gather(initial_softmax, -1, initial_pi_action)
+        expert_pi_q = torch.gather(expert_softmax, -1, expert_pi_action)
+
+        delta_Q = -(initial_pi_q+expert_pi_q)/2
         critic_loss = (is_weights * F.mse_loss(Q, target_Q, reduction='none')).mean()*(1-bc_weight) - bc_loss*bc_weight*0.03
+
+        optimistic_loss = self._eta * delta_Q.mean()
+
+        total_loss = critic_loss + optimistic_loss
 
         if self.use_tb:
             metrics['critic_target_q'] = target_Q.mean().item()
             metrics['critic_q'] = Q.mean().item()
             metrics['critic_loss'] = critic_loss.item()
+            metrics['optimistic_loss'] = optimistic_loss.item()
         if bc_regularize:
             metrics['bc_loss'] = bc_loss.item()
 
@@ -354,7 +371,7 @@ class DACAgent:
         if self.use_encoder:
             self.encoder_opt.zero_grad(set_to_none=True)
         self.critic_opt.zero_grad(set_to_none=True)
-        critic_loss.backward()
+        total_loss.backward()
         self.critic_opt.step()
         if self.use_encoder:
             self.encoder_opt.step()
@@ -458,7 +475,7 @@ class DACAgent:
             
         return metrics
 
-    def update(self, replay_iter, expert_replay_iter, step, bc_regularize=False, expert_demo=None, update_disc=True):
+    def update(self, replay_iter, expert_replay_iter, initial_iter, step, bc_regularize=False, expert_demo=None, update_disc=True):
         metrics = dict()
 
         if step % self.update_every_steps != 0:
@@ -483,14 +500,21 @@ class DACAgent:
 
         expert_obs, expert_action, expert_next_obs = utils.to_torch(next(expert_replay_iter),
                                                    self.device)
+        
+        initial_obs, initial_action, initial_next_obs = utils.to_torch(next(initial_iter),
+                                                   self.device)
 
         expert_obs = expert_obs.float()
         expert_next_obs = expert_next_obs.float()
+        initial_obs = initial_obs.float()
+        initial_next_obs = initial_next_obs.float()
 
         obs_before_aug = obs
         next_obs_before_aug = next_obs
         expert_obs_before_aug = expert_obs
         expert_next_obs_before_aug = expert_next_obs
+        initial_obs_before_aug = initial_obs
+        initial_next_obs_before_aug = initial_next_obs
 
         if expert_demo is not None:
             if not self.state_trans:
@@ -506,6 +530,7 @@ class DACAgent:
             obs = self.aug(obs)
             next_obs = self.aug(next_obs)
             expert_obs = self.aug(expert_obs)
+            initial_obs = self.aug(initial_obs)
             # expert_next_obs = self.aug(expert_next_obs) # Do not augment expert next obs reach better results
         else:
             obs_qfilter = obs.clone()
@@ -515,12 +540,16 @@ class DACAgent:
         disc_next_obs = next_obs
         disc_expert_obs = expert_obs
         disc_expert_next_obs = expert_next_obs
+        disc_initial_obs = initial_obs
+        disc_initial_next_obs = initial_next_obs
         # if self.disc_aug.__class__.__name__ != "RandomShiftsAug" and self.augment: # default is random_shift
         if self.augment: # default is random_shift
             disc_obs = self.disc_aug(obs_before_aug)
             disc_next_obs = self.disc_aug(next_obs_before_aug)
             disc_expert_obs = self.disc_aug(expert_obs_before_aug)
             disc_expert_next_obs = self.disc_aug(expert_next_obs_before_aug)
+            disc_initial_obs = self.disc_aug(initial_obs_before_aug)
+            disc_initial_next_obs = self.disc_aug(initial_next_obs_before_aug)
         # disc_obs = obs_before_aug
         # disc_next_obs = next_obs_before_aug
         # disc_expert_obs = expert_obs_before_aug
@@ -530,11 +559,15 @@ class DACAgent:
             disc_next_obs = self.disc_encoder(disc_next_obs)
             disc_expert_obs = self.disc_encoder(disc_expert_obs)
             disc_expert_next_obs = self.disc_encoder(disc_expert_next_obs)
+            disc_initial_obs = self.disc_encoder(disc_initial_obs)
+            disc_initial_next_obs = self.disc_encoder(disc_initial_next_obs)
             if "weighted_feature" in self.disc_type:
                 _, disc_obs = disc_obs
                 _, disc_next_obs = disc_next_obs
                 _, disc_expert_obs = disc_expert_obs
                 _, disc_expert_next_obs = disc_expert_next_obs
+                _, disc_initial_obs = disc_initial_obs
+                _, disc_initial_next_obs = disc_initial_next_obs
         
         if update_disc:
             results = self.update_discriminator(disc_obs, action, disc_expert_obs,
@@ -575,6 +608,7 @@ class DACAgent:
                 obs = disc_obs
                 next_obs = disc_next_obs
                 expert_obs = disc_expert_obs
+                initial_obs = disc_initial_obs
             else:
                 obs = self.encoder(obs)
                 with torch.no_grad():
@@ -584,10 +618,13 @@ class DACAgent:
                         next_obs = self.encoder(next_obs)
                     expert_obs = self.encoder(expert_obs)
                     # expert_next_obs = self.encoder(expert_next_obs)
+                    initial_obs = self.encoder(initial_obs)
+                    # initial_next_obs = self.encoder(initial_next_obs)
                 if "weighted_feature" in self.disc_type:
                     obs, _ = obs
                     next_obs, _ = next_obs
                     expert_obs, _ = expert_obs
+                    initial_obs, _ = initial_obs
 
         if self.use_tb:
             metrics['batch_reward'] = reward.mean().item()
@@ -611,10 +648,10 @@ class DACAgent:
             # update critic
             if self.use_per:
                 metrics.update(
-                    self.update_discrete_critic(obs, action, new_rew, discount, next_obs, tree_indices=tree_idx, is_weights=is_weight, bc_regularize=bc_regularize, step=step, expert_obs=expert_obs, expert_act=expert_action))
+                    self.update_discrete_critic(obs, action, initial_obs, initial_action, new_rew, discount, next_obs, initial_next_obs, tree_indices=tree_idx, is_weights=is_weight, bc_regularize=bc_regularize, step=step, expert_obs=expert_obs, expert_act=expert_action))
             else:
                 metrics.update(
-                    self.update_discrete_critic(obs, action, new_rew, discount, next_obs, bc_regularize=bc_regularize, step=step, expert_obs=expert_obs, expert_act=expert_action))
+                    self.update_discrete_critic(obs, action, initial_obs, initial_action, new_rew, discount, next_obs, initial_next_obs, bc_regularize=bc_regularize, step=step, expert_obs=expert_obs, expert_act=expert_action))
         
         else:
             # update critic
@@ -729,9 +766,12 @@ class DACAgent:
     def update_discriminator(self, policy_obs, policy_action, expert_obs,
                              expert_action, policy_next_obs=None, expert_next_obs=None):
         metrics = dict()
-        batch_size = expert_obs.shape[0]
+        batch_size = expert_obs.shape[0]//2
         obs_shape = expert_obs.shape[1]
         # policy batch size is 2x
+        expert_obs = expert_obs[:batch_size]
+        expert_next_obs = expert_next_obs[:batch_size]
+        expert_action = expert_action[:batch_size]
         policy_obs = policy_obs[:batch_size]
         policy_next_obs = policy_next_obs[:batch_size]
         policy_action = policy_action[:batch_size]

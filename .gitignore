@@ -1,8 +1,8 @@
-exp_local/*
-bc_weights/*
+*/exp_local/*
+*/bc_weights/*
 weights/*
-expert_demos/*
+*/expert_demos/*
 baseline/*
 expert_data/*
 results/*
-__pycache__/
+**/__pycache__/

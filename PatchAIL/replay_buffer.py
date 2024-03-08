@@ -491,3 +491,42 @@ class PrioritizedReplayBuffer(ReplayBuffer):
     def update(self, tree_idx, error):
         p = self._get_priority(error)
         self._sum_tree.update_batch(tree_idx, p)
+
+class InitialBuffer(IterableDataset):
+    def __init__(self, dataset_path, num_demos, obs_type, nstep):
+        with open(dataset_path, 'rb') as f:
+            if obs_type == 'pixels':
+                obses, _, actions, _ = pickle.load(f)
+            elif obs_type == 'features':
+                _, obses, actions, _ = pickle.load(f)
+
+        self._initials = []
+        self._nstep = nstep
+        self._size = 0
+        for i in range(num_demos):
+            initial=(obses[i][0],actions[i][1],obses[i][self._nstep])
+            self._initials.append(initial)
+            self._size+=1
+
+    def store_initial(self, initial):
+        self._initials.append(initial)
+        self._size+=1
+
+    def size(self):
+        return self._size     
+
+    def _sample(self):
+        initial = random.choice(self._initials)
+        return initial
+
+    def __iter__(self):
+        while True:
+            yield self._sample()
+
+def make_initial_loader(initialbuffer, batch_size):
+    loader = torch.utils.data.DataLoader(initialbuffer,
+                                         batch_size=batch_size,
+                                         num_workers=2,
+                                         pin_memory=True,
+                                         worker_init_fn=_worker_init_fn)
+    return loader

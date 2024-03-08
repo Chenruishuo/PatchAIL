@@ -19,7 +19,7 @@ import warnings
 import os
 
 os.environ['MKL_SERVICE_FORCE_INTEL'] = '1'
-os.environ['MUJOCO_GL'] = 'egl'
+os.environ['MUJOCO_GL'] = 'osmesa'
 from pathlib import Path
 
 import hydra
@@ -29,7 +29,7 @@ from dm_env import specs
 
 import utils
 from logger import Logger
-from replay_buffer import ReplayBufferStorage, make_replay_loader, make_expert_replay_loader
+from replay_buffer import ReplayBufferStorage, make_replay_loader, make_expert_replay_loader,InitialBuffer,make_initial_loader
 from video import TrainVideoRecorder, VideoRecorder
 import pickle
 import random
@@ -85,7 +85,7 @@ class WorkspaceIL:
             self.cfg.suite.num_seed_frames = 0
 
         self.expert_replay_loader = make_expert_replay_loader(
-            self.cfg.expert_dataset, self.cfg.batch_size // 2, self.cfg.num_demos, self.cfg.obs_type)
+            self.cfg.expert_dataset, self.cfg.batch_size, self.cfg.num_demos, self.cfg.obs_type)
         # self.expert_replay_loader = make_expert_replay_loader(
         #     self.cfg.expert_dataset, self.cfg.batch_size, self.cfg.num_demos, self.cfg.obs_type)
         self.expert_replay_iter = iter(self.expert_replay_loader)
@@ -140,11 +140,16 @@ class WorkspaceIL:
             self.work_dir / 'buffer', self.cfg.replay_buffer_size,
             self.cfg.batch_size, self.cfg.replay_buffer_num_workers,
             self.cfg.suite.save_snapshot, self.cfg.nstep, self.cfg.suite.discount, use_per=self.use_per)
+        
+        self.initial_buffer = InitialBuffer(
+                self.cfg.expert_dataset, self.cfg.num_demos, self.cfg.obs_type, self.cfg.nstep)
+        self.initial_loader = make_initial_loader(self.initial_buffer, self.cfg.batch_size)
 
         self._replay_iter = None
         self.expert_replay_iter = None
         self.video_recorder = None
         self.train_video_recorder = None
+        self._initial_iter = None
         
         if self.cfg.record_video:
             self.video_recorder = VideoRecorder(
@@ -169,6 +174,12 @@ class WorkspaceIL:
         if self._replay_iter is None:
             self._replay_iter = iter(self.replay_loader)
         return self._replay_iter
+    
+    @property
+    def initial_iter(self):
+        if self._initial_iter is None:
+            self._initial_iter = iter(self.initial_loader)
+        return self._initial_iter
 
     def eval(self):
         step, episode, total_reward = 0, 0, 0
@@ -290,6 +301,13 @@ class WorkspaceIL:
                                 elt = elt._replace(reward=new_rewards[i])
                     self.replay_storage.add(elt)
 
+                # update initial buffer
+                self.initial_buffer.store_initial((
+                    time_steps[0].observation[self.cfg.obs_type],
+                    time_steps[1].action,
+                    time_steps[self.cfg.nstep].observation[self.cfg.obs_type]
+                ))
+
                 if metrics is not None:
                     # log stats
                     elapsed_time, total_time = self.timer.reset()
@@ -302,6 +320,7 @@ class WorkspaceIL:
                         log('episode_length', episode_frame)
                         log('episode', self.global_episode)
                         log('buffer_size', len(self.replay_storage))
+                        log('initial_buffer_size', self.initial_buffer.size())
                         log('step', self.global_step)
                         if repr(self.agent) == 'potil' or repr(self.agent) == 'dac' and not self.use_gt_rew:
                                 log('expert_reward', self.expert_reward)
@@ -348,7 +367,7 @@ class WorkspaceIL:
                 if ("use_simreg" in self.cfg.agent) and (self.cfg.agent.use_simreg):
                     idx = random.randint(0, self.cfg.num_demos-1)
                     exp_demo = self.expert_demo[idx] # self.expert_demo_trans
-                metrics = self.agent.update(self.replay_iter, self.expert_replay_iter, 
+                metrics = self.agent.update(self.replay_iter, self.expert_replay_iter, self.initial_iter,
                                             self.global_step, self.cfg.bc_regularize, exp_demo, update_disc=(not self.use_gt_rew))
                 
                 if self.use_per and len(metrics.keys()):
@@ -402,6 +421,8 @@ def delete_file(dir_path, name):
 
 @hydra.main(config_path='cfgs', config_name='config_normal')
 def main(cfg):
+    utils.set_seed_everywhere(cfg.seed)
+    torch.backends.cudnn.deterministic=True
     from train import WorkspaceIL as W
     root_dir = Path.cwd()
     workspace = W(cfg)

@@ -24,3 +24,4 @@ disc_type: 'encoder'
 state_trans: true
 reward_scale: ${reward_scale}
 share_encoder: true
+eta: 0
