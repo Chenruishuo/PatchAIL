@@ -494,7 +494,7 @@ class DACAgent:
         else:
             obs, action, reward, discount, next_obs = utils.to_torch(
                         next(replay_iter), self.device)
-        reward = self.dac_rewarder(obs, action)
+        reward = self.dac_rewarder(obs, action, clip=True)
         
         # reward = torch.from_numpy(self.dac_rewarder(obs, action, next_obses=next_obs)).to(self.device).unsqueeze(1)
 
@@ -503,7 +503,7 @@ class DACAgent:
 
         expert_obs, expert_action, expert_next_obs = utils.to_torch(next(expert_replay_iter),
                                                    self.device)
-        expert_reward = self.dac_rewarder(expert_obs, expert_action)
+        expert_reward = self.dac_rewarder(expert_obs, expert_action, clip=True)
 
         initial_obs, initial_action, initial_next_obs = utils.to_torch(next(initial_iter),
                                                    self.device)
