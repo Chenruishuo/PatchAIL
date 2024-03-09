@@ -17,35 +17,53 @@ import torch.nn.functional as F
 import torch
 import utils
 
+
+# class AtariQNetwork(SoftQNetwork):
+#     def __init__(self, obs_dim, action_dim, args, device='cpu', input_dim=(84, 84)):
+#         super(AtariQNetwork, self).__init__(obs_dim, action_dim, args, device)
+#         self.frames = 4
+#         self.n_outputs = action_dim
+
+#         # CNN modeled off of Mnih et al.
+#         self.cnn = nn.Sequential(
+#             nn.Conv2d(self.frames, 32, kernel_size=8, stride=4),
+#             nn.ReLU(),
+#             nn.Conv2d(32, 64, kernel_size=4, stride=2),
+#             nn.ReLU(),
+#             nn.Conv2d(64, 64, kernel_size=3, stride=1),
+#             nn.ReLU()
+#         )
+
+#         self.fc_layer_inputs = self.cnn_out_dim(input_dim)
+
+#         self.fully_connected = nn.Sequential(
+#             nn.Linear(self.fc_layer_inputs, 512, bias=True),
+#             nn.ReLU(),
+#             nn.Linear(512, self.n_outputs))
+
+#     def cnn_out_dim(self, input_dim):
+#         return self.cnn(torch.zeros(1, self.frames, *input_dim)
+#                         ).flatten().shape[0]
+
+#     def _forward(self, x, *args):
+#         cnn_out = self.cnn(x).reshape(-1, self.fc_layer_inputs)
+#         return self.fully_connected(cnn_out)
+    
+    
 class DiscreteCritic(nn.Module):
     def __init__(self, repr_dim, n_actions, feature_dim, hidden_dim):
         super().__init__()
 
-        self.trunk = nn.Sequential(nn.Linear(repr_dim, feature_dim),
-                                   nn.LayerNorm(feature_dim), nn.Tanh(),
-                                #    nn.Linear(feature_dim, feature_dim),nn.ReLU()
-                                   )
-
-        self.Vnet = nn.Sequential(
-            nn.Linear(feature_dim, hidden_dim),
-            # nn.ReLU(inplace=True), nn.Linear(hidden_dim, hidden_dim),
-            # nn.ReLU(inplace=True), nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(inplace=True), nn.Linear(hidden_dim, 1))
-
-        self.Anet = nn.Sequential(
-            nn.Linear(feature_dim, hidden_dim),
-            # nn.ReLU(inplace=True), nn.Linear(hidden_dim, hidden_dim),
-            # nn.ReLU(inplace=True), nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(inplace=True), nn.Linear(hidden_dim, n_actions))
-
+        self.fully_connected = nn.Sequential(
+            nn.Linear(repr_dim, 512, bias=True),
+            nn.ReLU(),
+            nn.Linear(512, n_actions))
+        
+        self.trunk = nn.Identity()
         self.apply(utils.weight_init)
 
     def forward(self, obs):
-        h = self.trunk(obs)
-        v = self.Vnet(h)
-        a = self.Anet(h)
-        q = v + a - a.mean(1, keepdim=True)
-
+        q = self.fully_connected(obs)
         return q
 
 class DiscreteActor(nn.Module):

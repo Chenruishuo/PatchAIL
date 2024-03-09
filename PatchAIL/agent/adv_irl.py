@@ -175,8 +175,8 @@ class DACAgent:
         else:
             repr_dim = obs_shape[0]
 
-        disc_dim = feature_dim + action_shape[0] if use_actions else feature_dim
-        disc_dim = feature_dim * 2 if state_trans else disc_dim # if do state trans (s,s'), overwrite use_actions
+        disc_dim = repr_dim + action_shape[0] if use_actions else repr_dim
+        disc_dim = repr_dim * 2 if state_trans else disc_dim # if do state trans (s,s'), overwrite use_actions
         if "patch" in self.disc_type:
             disc_dim = obs_shape[0]*2 if self.state_trans else obs_shape[0]
             self.discriminator = PatchDiscriminator(disc_dim, disc_final_iid).to(device)

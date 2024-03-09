@@ -28,15 +28,17 @@ except:
 class Discriminator(nn.Module):
     def __init__(self, in_dim, hid_dim):
         super().__init__()
-        self.trunk = nn.Sequential(nn.Linear(in_dim, hid_dim), nn.ReLU(),
-                                   nn.Linear(hid_dim, hid_dim), nn.ReLU(),
-                                   nn.Linear(hid_dim, 1))
+
+        self.fully_connected = nn.Sequential(
+            nn.Linear(in_dim, 512, bias=True),
+            nn.ReLU(),
+            nn.Linear(512, 1))
 
         self.apply(utils.weight_init)
 
-    def forward(self, x):
-        output = self.trunk(x)
-        return output
+    def forward(self, obs):
+        q = self.fully_connected(obs)
+        return q
 
 class WeightedFeatureDiscriminator(nn.Module):
     def __init__(self, in_dim):
