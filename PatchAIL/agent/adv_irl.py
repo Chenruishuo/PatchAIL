@@ -485,198 +485,53 @@ class DACAgent:
             return metrics
 
         self.global_step = step
-
-        # print(len(next(replay_iter)), replay_iter)
         
-        if self.use_per:
-            obs, action, reward, discount, next_obs, tree_idx, is_weight = utils.to_torch(
-                        next(replay_iter), self.device)
-        else:
-            obs, action, reward, discount, next_obs = utils.to_torch(
-                        next(replay_iter), self.device)
-        # reward = self.dac_rewarder(obs, action, clip=True)
-        
-        # reward = torch.from_numpy(self.dac_rewarder(obs, action, next_obses=next_obs)).to(self.device).unsqueeze(1)
+        obs, action, reward, discount, next_obs = utils.to_torch(next(replay_iter), self.device)
+        reward = self.dac_rewarder(obs, action, next_obs)
+        expert_obs, expert_action, expert_next_obs = utils.to_torch(next(expert_replay_iter), self.device)
+        expert_reward = self.dac_rewarder(expert_obs, expert_action, expert_next_obs)
+        initial_obs, initial_action, initial_next_obs = utils.to_torch(next(initial_iter),self.device)
 
         obs = obs.float()
         next_obs = next_obs.float()
-
-        expert_obs, expert_action, expert_next_obs = utils.to_torch(next(expert_replay_iter),
-                                                   self.device)
-        expert_reward = self.dac_rewarder(expert_obs, expert_action)
-
-        initial_obs, initial_action, initial_next_obs = utils.to_torch(next(initial_iter),
-                                                   self.device)
-
         expert_obs = expert_obs.float()
         expert_next_obs = expert_next_obs.float()
         initial_obs = initial_obs.float()
         initial_next_obs = initial_next_obs.float()
 
-        obs_before_aug = obs
-        next_obs_before_aug = next_obs
-        expert_obs_before_aug = expert_obs
-        expert_next_obs_before_aug = expert_next_obs
-        initial_obs_before_aug = initial_obs
-        initial_next_obs_before_aug = initial_next_obs
-
-        if expert_demo is not None:
-            if not self.state_trans:
-                all_demo = torch.as_tensor(expert_demo, device=self.device)
-            else:
-                demo = torch.as_tensor(expert_demo[:-1], device=self.device)
-                demo_next = torch.as_tensor(expert_demo[1:], device=self.device)
-                all_demo = torch.cat([demo, demo_next], dim=1)
-
         # augment
         if self.use_encoder and self.augment:
-            obs_qfilter = self.aug(obs.clone())
             obs = self.aug(obs)
             next_obs = self.aug(next_obs)
             expert_obs = self.aug(expert_obs)
+            expert_next_obs = self.aug(expert_next_obs) 
             initial_obs = self.aug(initial_obs)
-            # expert_next_obs = self.aug(expert_next_obs) # Do not augment expert next obs reach better results
-        else:
-            obs_qfilter = obs.clone()
+            initial_next_obs = self.aug(initial_next_obs)
 
-        # disc encode
-        disc_obs = obs
-        disc_next_obs = next_obs
-        disc_expert_obs = expert_obs
-        disc_expert_next_obs = expert_next_obs
-        disc_initial_obs = initial_obs
-        disc_initial_next_obs = initial_next_obs
-        # if self.disc_aug.__class__.__name__ != "RandomShiftsAug" and self.augment: # default is random_shift
-        if self.augment: # default is random_shift
-            disc_obs = self.disc_aug(obs_before_aug)
-            disc_next_obs = self.disc_aug(next_obs_before_aug)
-            disc_expert_obs = self.disc_aug(expert_obs_before_aug)
-            disc_expert_next_obs = self.disc_aug(expert_next_obs_before_aug)
-            disc_initial_obs = self.disc_aug(initial_obs_before_aug)
-            disc_initial_next_obs = self.disc_aug(initial_next_obs_before_aug)
-        # disc_obs = obs_before_aug
-        # disc_next_obs = next_obs_before_aug
-        # disc_expert_obs = expert_obs_before_aug
-        # disc_expert_next_obs = expert_next_obs_before_aug
-        if self.use_encoder and ("patch" not in self.disc_type) and ("vit" not in self.disc_type): # only encode when not using patch gail or vii gail
-            disc_obs = self.disc_encoder(disc_obs)
-            disc_next_obs = self.disc_encoder(disc_next_obs)
-            disc_expert_obs = self.disc_encoder(disc_expert_obs)
-            disc_expert_next_obs = self.disc_encoder(disc_expert_next_obs)
-            disc_initial_obs = self.disc_encoder(disc_initial_obs)
-            disc_initial_next_obs = self.disc_encoder(disc_initial_next_obs)
-            if "weighted_feature" in self.disc_type:
-                _, disc_obs = disc_obs
-                _, disc_next_obs = disc_next_obs
-                _, disc_expert_obs = disc_expert_obs
-                _, disc_expert_next_obs = disc_expert_next_obs
-                _, disc_initial_obs = disc_initial_obs
-                _, disc_initial_next_obs = disc_initial_next_obs
+        if self.use_encoder:
+            obs = self.encoder(obs)
+            next_obs = self.encoder(next_obs)
+            expert_obs = self.encoder(expert_obs)
+            expert_next_obs = self.encoder(expert_next_obs)
+            initial_obs = self.encoder(initial_obs)
+            initial_next_obs = self.encoder(initial_next_obs)
         
         if update_disc:
-            results = self.update_discriminator(disc_obs, action, disc_expert_obs,
-                                                expert_action, disc_next_obs, disc_expert_next_obs)
+            results = self.update_discriminator(obs, action, expert_obs, expert_action, next_obs, expert_next_obs)
             metrics.update(results)
 
-        # Compute the distance of the patch matrics between agent and expert
-        similarity = 1
-        if self.use_encoder and ("patch" in self.disc_type) and self.use_simreg:
-            if expert_demo is not None:
-                expert_disc_input = all_demo
-            else:
-                if self.state_trans:
-                    expert_disc_input = torch.cat([expert_obs_before_aug, expert_next_obs_before_aug], dim=1)
-                else:
-                    expert_disc_input = expert_obs_before_aug
-            if self.state_trans:
-                disc_input = torch.cat([obs_before_aug, next_obs_before_aug], dim=1) # use before aug obs for simreg
-            else:
-                disc_input = obs_before_aug
-            expert_dist = torch.sigmoid(self.discriminator(expert_disc_input).detach().view(expert_disc_input.shape[0],-1))
-            expert_dist = expert_dist.mean(dim=0, keepdim=True) # if use Eq(6), remove this line and change line 551 to line 550
-            expert_dist /= expert_dist.sum(dim=1, keepdim=True)
-            agent_dist = torch.sigmoid(self.discriminator(disc_input).detach().view(disc_input.shape[0],-1))
-            agent_dist /= agent_dist.sum(dim=1, keepdim=True)
-            ## similarity = (F.cosine_similarity(agent_dist, expert_dist).unsqueeze(1) + 1) / 2
-            # similarity = (-((agent_dist * agent_dist.log()).sum(dim=1,keepdim=True) - torch.einsum('ik,jk->ij', agent_dist, expert_dist.log()))).exp().max(dim=1,keepdim=True)[0] # exp(-KLD) Eq(6)
-            similarity = (-(agent_dist * (agent_dist.log() - expert_dist.log())).sum(dim=1, keepdim=True)).exp() # exp(-KLD) approximation Eq(7)
-            if (type(self.sim_rate) == str) and ('auto' in self.sim_rate): # sim_rate should be like 'auto-1.0'
-                self.sim_rate = float(self.sim_rate.split("-")[1]) / similarity.mean().item()
-            similarity = self.sim_rate * similarity
-            assert similarity.shape == reward.shape
-            metrics['similarity'] = similarity.mean().item()
-
-        # normal encode
-        if self.use_encoder:
-            if ("weighted_feature" not in self.disc_type) and ("patch" not in self.disc_type) and ("vit" not in self.disc_type) and self.share_encoder: # shared encoder just use previous variables, do not have to infer again
-                obs = disc_obs
-                next_obs = disc_next_obs
-                expert_obs = disc_expert_obs
-                expert_next_obs = disc_expert_next_obs
-                initial_obs = disc_initial_obs
-                initial_next_obs = disc_initial_next_obs
-            else:
-                obs = self.encoder(obs)
-                with torch.no_grad():
-                    if self.target_enc:
-                        next_obs = self.encoder_target(next_obs)
-                        expert_obs = self.encoder_target(expert_obs)
-                        expert_next_obs = self.encoder(expert_next_obs)
-                        initial_obs = self.encoder_target(initial_obs)
-                        initial_next_obs = self.encoder(initial_next_obs)
-                    else:
-                        next_obs = self.encoder(next_obs)
-                        expert_obs = self.encoder(expert_obs)
-                        expert_next_obs = self.encoder(expert_next_obs)
-                        initial_obs = self.encoder(initial_obs)
-                        initial_next_obs = self.encoder(initial_next_obs)
-                if "weighted_feature" in self.disc_type:
-                    obs, _ = obs
-                    next_obs, _ = next_obs
-                    expert_obs, _ = expert_obs
-                    initial_obs, _ = initial_obs
-
-        if self.use_tb:
-            metrics['batch_reward'] = reward.mean().item()
-        
-        expert_obs = expert_obs.detach()
-        expert_action = expert_action.detach()
-        if bc_regularize and self.bc_weight_type=="qfilter":
-            obs_qfilter = self.encoder_bc(obs_qfilter) if self.use_encoder else obs_qfilter
-            obs_qfilter = obs_qfilter.detach()
-        else:
-            obs_qfilter = None
-        
-        if self.sim_type == "weight":
-            new_rew = similarity * reward
-            new_exp_rew = similarity * expert_reward
-        elif self.sim_type == "bonus":
-            new_rew = similarity + reward
-            new_exp_rew = similarity + expert_reward
-        else:
-            raise NotImplementedError
-
         if self.suite_name == "atari":
-            # update critic
-            if self.use_per:
-                metrics.update(
-                    self.update_discrete_critic(obs, action, initial_obs, initial_action, new_rew, new_exp_rew, discount, next_obs, initial_next_obs, tree_indices=tree_idx, is_weights=is_weight, bc_regularize=bc_regularize, step=step, expert_obs=expert_obs, expert_action=expert_action, expert_next_obs=expert_next_obs))
-            else:
-                metrics.update(
-                    self.update_discrete_critic(obs, action, initial_obs, initial_action, new_rew, new_exp_rew, discount, next_obs, initial_next_obs, bc_regularize=bc_regularize, step=step, expert_obs=expert_obs, expert_action=expert_action, expert_next_obs=expert_next_obs))
-        
+            metrics.update(self.update_discrete_critic(obs, action, initial_obs, initial_action, reward, expert_reward, discount, next_obs, initial_next_obs, 
+                                                       bc_regularize=bc_regularize, step=step, expert_obs=expert_obs, expert_action=expert_action, expert_next_obs=expert_next_obs))
         else:
             # update critic
-            metrics.update(
-                self.update_critic(obs, action, new_rew, discount, next_obs, step))
-
+            metrics.update(self.update_critic(obs, action, reward, discount, next_obs, step))
             # update actor
-            metrics.update(self.update_actor(obs.detach(), expert_obs, obs_qfilter, expert_action, bc_regularize, step))
+            metrics.update(self.update_actor(obs.detach(), expert_obs, obs, expert_action, bc_regularize, step))
 
         # update critic target
         utils.soft_update_params(self.critic, self.critic_target,
                                  self.critic_target_tau)
-
         # update encoder target
         utils.soft_update_params(self.encoder, self.encoder_target,
                                  self.enc_target_tau)
@@ -692,7 +547,6 @@ class DACAgent:
         if update_disc:
             metrics.update(self.record_grad_norm(self.discriminator, "discriminator"))
         metrics.update(self.record_grad_norm(self.encoder, "encoder"))
-        metrics.update(self.record_grad_norm(self.disc_encoder, "disc_encoder"))
 
         return metrics
 
@@ -710,15 +564,15 @@ class DACAgent:
         metrics[net_name+"grad_norm"] = total_norm
 
         return metrics
-
-    def dac_rewarder(self, obses, actions=None, next_obses=None, return_logits=False, clip=False):
+        
+    def dac_rewarder(self, obses, actions=None, next_obses=None):
         if type(obses) == np.ndarray:
             obses = torch.tensor(obses).to(self.device)
-        if "weighted_feature" in self.disc_type:
-            obses = self.encoder(obses) if self.share_encoder else self.disc_encoder(obses)
-            _, obses = obses
-        if ("weighted_feature" not in self.disc_type) and ("patch" not in self.disc_type) and ("vit" not in self.disc_type) and self.use_encoder:
-            obses = self.critic.trunk(self.encoder(obses)) if self.share_encoder else self.disc_trunk(self.disc_encoder(obses))
+        if type(next_obses) == np.ndarray:
+            next_obses = torch.tensor(next_obses).to(self.device)
+        obses = self.critic.trunk(self.encoder(obses)) if self.share_encoder else self.disc_trunk(self.disc_encoder(obses))
+        if next_obses is not None:
+            next_obses = self.critic.trunk(self.encoder(next_obses)) if self.share_encoder else self.disc_trunk(self.disc_encoder(next_obses))
         if self.use_actions:
             assert actions is not None, "actions should not be None!"
             actions = torch.tensor(actions).to(self.device)
@@ -729,51 +583,11 @@ class DACAgent:
             else:
                 obses = torch.cat([obses[0].unsqueeze(0), obses]) # for dummy first state
                 obses = torch.cat([obses[:-1], obses[1:]], dim=1)
-        discriminator = self.discriminator
-        if self.target_disc:
-            discriminator = self.discriminator_target
         with torch.no_grad():
             with utils.eval_mode(self.discriminator):
-                d = logits = discriminator(obses)
-                if return_logits:
-                    return logits
-                if ("patch" in self.disc_type) or ("vit" in self.disc_type): # input_patch or patch or vit
-                    d = logits.view(logits.shape[0],-1)
-                    if self.reward_aggr == "quantile":
-                        d = d.quantile(0.25, dim=1, keepdim=True)
-                    elif self.reward_aggr == "mean":
-                        d = d.mean(dim=1, keepdim=True)
-                    elif self.reward_aggr == "minmax":
-                        sort_d = d.sort(dim=1)[0]
-                        max_d = sort_d[..., int(d.shape[1]//4):].mean(dim=1, keepdim=True)
-                        min_d = sort_d[..., :int(d.shape[1]//4)].mean(dim=1, keepdim=True)
-                        d = (max_d + min_d) / 2
-                    elif self.reward_aggr == "median":
-                        d = d.median(dim=1, keepdim=True)[0]
-                    elif self.reward_aggr == "sum":
-                        d = d.sum(dim=1, keepdim=True)
-                    elif self.reward_aggr == "max":
-                        d = d.max(dim=1, keepdim=True)[0]
-                    elif self.reward_aggr == "min":
-                        d = d.min(dim=1, keepdim=True)[0]
-                    elif self.reward_aggr == "iqm":
-                        d = d.detach().cpu().numpy()
-                        d = stats.trim_mean(d, 0.1, axis=1)
-                        d = torch.from_numpy(d)
-            s = torch.sigmoid(d)
-            if self.reward_type == "airl": # If you compute log(D) - log(1-D) then you just get the logits
-                reward = d # s.log() - (1 - s).log()
-            elif self.reward_type == "gail":
-                reward = - (1 - s).log()
-            elif self.reward_type == "gail2":
-                reward = s.log()
-            elif self.reward_type == "fairl":
-                reward = torch.exp(d) * (-1.0 * d)
-            else:
-                raise NotImplementedError
-            if clip:
-                reward = torch.clamp(reward, min=-10, max=10)
-            return self.reward_scale * reward
+                reward = self.discriminator(obses)
+        return reward
+        
 
     def update_discriminator(self, policy_obs, policy_action, expert_obs,
                              expert_action, policy_next_obs=None, expert_next_obs=None):
