@@ -14,7 +14,7 @@ discount: 0.99
 hidden_dim: 256
 
 # train settings
-num_train_frames: 10006000
+num_train_frames: 3006000
 num_seed_frames: 50000
 # eval
 eval_every_frames: 40000

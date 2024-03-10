@@ -279,7 +279,7 @@ class WorkspaceIL:
                             observations, self.expert_demo, self.global_step)
                         new_rewards_sum = np.sum(new_rewards)
                     elif repr(self.agent) == 'dac':
-                        new_rewards = self.agent.dac_rewarder(observations, actions).flatten().detach().cpu().numpy()
+                        new_rewards = self.agent.dac_rewarder(observations, actions, clip=(self.cfg.suite.name=='atari')).flatten().detach().cpu().numpy()
 
                         new_rewards_sum = np.sum(new_rewards)
                         if len(new_rewards.shape) >= 2:

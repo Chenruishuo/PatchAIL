@@ -30,9 +30,9 @@ class Discriminator(nn.Module):
         super().__init__()
 
         self.fully_connected = nn.Sequential(
-            nn.Linear(in_dim, 512, bias=True),
+            nn.Linear(in_dim, 1024, bias=True),
             nn.ReLU(),
-            nn.Linear(512, 1))
+            nn.Linear(1024, 1))
 
         self.apply(utils.weight_init)
 

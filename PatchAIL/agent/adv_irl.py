@@ -489,7 +489,7 @@ class DACAgent:
         obs, action, reward, discount, next_obs = utils.to_torch(next(replay_iter), self.device)
         reward = self.dac_rewarder(obs, action, next_obs)
         expert_obs, expert_action, expert_next_obs = utils.to_torch(next(expert_replay_iter), self.device)
-        expert_reward = self.dac_rewarder(expert_obs, expert_action, expert_next_obs)
+        expert_reward = self.dac_rewarder(expert_obs, expert_action, expert_next_obs, clip=(self.suite_name=='atari'))
         initial_obs, initial_action, initial_next_obs = utils.to_torch(next(initial_iter),self.device)
 
         obs = obs.float()
@@ -565,7 +565,7 @@ class DACAgent:
 
         return metrics
         
-    def dac_rewarder(self, obses, actions=None, next_obses=None):
+    def dac_rewarder(self, obses, actions=None, next_obses=None, clip=False):
         if type(obses) == np.ndarray:
             obses = torch.tensor(obses).to(self.device)
         if type(next_obses) == np.ndarray:
@@ -586,6 +586,8 @@ class DACAgent:
         with torch.no_grad():
             with utils.eval_mode(self.discriminator):
                 reward = self.discriminator(obses)
+        if clip:
+                reward = torch.clamp(reward, min=-10, max=10)
         return reward
         
 
