@@ -18,11 +18,6 @@ import torch.nn.functional as F
 
 import utils
 
-try:
-    from einops import rearrange, repeat
-except:
-    print("cannot import vit_pytorch")
-
 
 class Discriminator(nn.Module):
     def __init__(self, in_dim):

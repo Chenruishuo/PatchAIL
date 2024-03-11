@@ -25,7 +25,7 @@ record_video: false
 # experiment
 obs_type: 'pixels' # pixels, features
 reward_type: 'airl' # airl, gail, gail2
-experiment: eta=${agent.eta}&mix_td=${agent.mix_td}&argmax/seed=${seed}
+experiment: eta=${agent.eta}&${agent.max_q_type}&mix_td=${agent.mix_td}/seed=${seed}
 
 # expert dataset
 num_demos: 20 #50(openaigym), 10(dmc), 1(metaworld), 1(particle), 1(robotgym)

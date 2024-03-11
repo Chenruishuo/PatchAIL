@@ -22,3 +22,4 @@ obs_type: ${obs_type}
 state_trans: true
 eta: 0
 mix_td: false
+max_q_type: 'initial'

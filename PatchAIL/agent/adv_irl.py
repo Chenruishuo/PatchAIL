@@ -79,13 +79,14 @@ class DACAgent:
     def __init__(self, obs_shape, action_shape, device, lr, feature_dim,
                  hidden_dim, critic_target_tau, num_expl_steps,
                  update_every_steps, stddev_schedule, stddev_clip, init_temp, use_tb,
-                 augment, use_actions, suite_name, obs_type, eta, mix_td,
+                 augment, use_actions, suite_name, obs_type, eta, mix_td, max_q_type,
                  n_actions=None, state_trans=False, disc_aug="random_shift",
                  grad_pen_weight=10.0, disc_lr=None, target_enc=False, enc_target_tau=0.05):
         self.device = device
         self.lr = lr
         self._eta = eta
         self.mix_td = mix_td
+        self.max_q_type = max_q_type
         self.critic_target_tau = critic_target_tau
         self.enc_target_tau = enc_target_tau
         self.update_every_steps = update_every_steps
@@ -223,24 +224,30 @@ class DACAgent:
             next_obs = torch.cat([next_obs[:half_batch_size],expert_next_obs[:half_batch_size]],dim=0)
             reward = torch.cat((reward[:half_batch_size], expert_reward[:half_batch_size]),dim=0)
         with torch.no_grad():
-            dist = self.critic(next_obs)
-            next_action = dist.argmax(dim=-1)
-            target_Q = self.critic_target(next_obs)[range(len(obs)),next_action].unsqueeze(-1)
-            target_Q = reward + (discount * target_Q)
-            # next_Q= self.critic_target(next_obs)
-            # next_V = self.alpha * torch.logsumexp(next_Q / self.alpha, dim=1, keepdim=True)
-            # target_Q = reward + discount * next_V
+            # dist = self.critic(next_obs)
+            # next_action = dist.argmax(dim=-1)
+            # target_Q = self.critic_target(next_obs)[range(len(obs)),next_action].unsqueeze(-1)
+            # target_Q = reward + (discount * target_Q)
+            next_Q= self.critic_target(next_obs)
+            next_V = self.alpha * torch.logsumexp(next_Q / self.alpha, dim=1, keepdim=True)
+            target_Q = reward + discount * next_V
         Q = self.critic(obs)[range(len(obs)), action.long()].unsqueeze(-1)
         critic_loss = F.mse_loss(Q, target_Q)
         
-        obs_to_max = torch.cat([initial_obs, expert_obs],dim=0)
-        max_V = self.alpha * torch.logsumexp(self.critic(obs_to_max) / self.alpha, dim=1, keepdim=True)
-        # dist_to_max = self.critic(obs_to_max)
-        # softmax_to_max = F.softmax(dist_to_max, dim=-1)
-        # with torch.no_grad():
-        #     pi_action_to_max = torch.multinomial(softmax_to_max, 1)
-        # delta_Q = -torch.gather(softmax_to_max, -1, pi_action_to_max)
-        optimistic_loss = -self._eta * max_V.mean()
+        if self.max_q_type == 'aug_expert_obs_only':
+            obs_to_max = torch.cat([initial_obs, expert_obs],dim=0)
+            max_V = self.alpha * torch.logsumexp(self.critic(obs_to_max) / self.alpha, dim=1, keepdim=True)
+            optimistic_loss = -self._eta * max_V.mean()
+        elif self.max_q_type == 'initial':
+            max_V = self.alpha * torch.logsumexp(self.critic(initial_obs) / self.alpha, dim=1, keepdim=True)
+            optimistic_loss = -self._eta * max_V.mean()
+        elif self.max_q_type == 'aug_expert_obs_and_action':
+            max_V = self.alpha * torch.logsumexp(self.critic(initial_obs) / self.alpha, dim=1, keepdim=True)
+            expert_dist = self.critic(expert_obs)
+            expert_Q = torch.gather(expert_dist, -1, expert_action.view(expert_action.shape[0],-1))
+            optimistic_loss = -self._eta * (max_V+expert_Q).mean()/2
+        else:
+            print("max_q_type not in list!")
 
         total_loss = critic_loss + optimistic_loss
 
