@@ -215,26 +215,16 @@ def _worker_init_fn(worker_id):
 
 
 def make_replay_loader(replay_dir, max_size, batch_size, num_workers,
-                       save_snapshot, nstep, discount, use_per):
+                       save_snapshot, nstep, discount):
     max_size_per_worker = max_size // max(1, num_workers)
 
-    if use_per:
-        iterable = PrioritizedReplayBuffer(replay_dir,
-                            max_size_per_worker,
-                            num_workers,
-                            nstep,
-                            discount,
-                            fetch_every=1000,
-                            save_snapshot=save_snapshot,
-                            batch_size=batch_size)
-    else:
-        iterable = ReplayBuffer(replay_dir,
-                            max_size_per_worker,
-                            num_workers,
-                            nstep,
-                            discount,
-                            fetch_every=1000,
-                            save_snapshot=save_snapshot)
+    iterable = ReplayBuffer(replay_dir,
+                        max_size_per_worker,
+                        num_workers,
+                        nstep,
+                        discount,
+                        fetch_every=1000,
+                        save_snapshot=save_snapshot)
 
     loader = torch.utils.data.DataLoader(iterable,
                                          batch_size=batch_size,

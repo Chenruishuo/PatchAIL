@@ -44,6 +44,7 @@ class Encoder(nn.Module):
         cnn_out = self.cnn(x).reshape(-1, self.repr_dim)
         return cnn_out
 
+
 class AtariEncoder(nn.Module):
     def __init__(self, obs_shape):
         super().__init__()
@@ -57,13 +58,9 @@ class AtariEncoder(nn.Module):
                                      nn.ReLU(), nn.Conv2d(32, 64, 4, stride=2),
                                      nn.ReLU(), nn.Conv2d(64, 64, 3, stride=1),
                                      nn.ReLU())
-
-        # self.repr_dim = 225792
-        # self.convnet = nn.Sequential(nn.Conv2d(obs_shape[0], 32, 3, stride=1, padding='same'),
-        #                              nn.ReLU(), nn.Conv2d(32, 32, 3, stride=1, padding='same'),
-        #                              nn.ReLU(), nn.Conv2d(32, 32, 3, stride=1, padding='same'),
-        #                              nn.ReLU(), nn.Conv2d(32, 32, 3, stride=1, padding='same'),
-        #                              nn.ReLU())
+        
+        # self.trunk = nn.Sequential(nn.Linear(self.repr_dim, feature_dim),
+        #                            nn.LayerNorm(feature_dim), nn.Tanh())
 
         self.apply(utils.weight_init)
 
@@ -71,8 +68,6 @@ class AtariEncoder(nn.Module):
         obs = obs / 255.0 - 0.5
         h = self.convnet(obs)
         h_flat = h.view(h.shape[0], -1)
-        if 'unflatten' in dir(self) and self.unflatten:
-            return h_flat, h
         return h_flat
 
 class EasyEncoder(nn.Module):

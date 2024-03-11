@@ -37,10 +37,12 @@ import random
 warnings.filterwarnings('ignore', category=DeprecationWarning)
 torch.backends.cudnn.benchmark = True
 
+
 def make_agent(obs_spec, action_spec, cfg):
     cfg.obs_shape = obs_spec[cfg.obs_type].shape
     cfg.action_shape = action_spec.shape
     return hydra.utils.instantiate(cfg)
+
 
 def add_noise(observation, zone='random', noise_size=14, noise_type='random', noise_scale=0.1):
     if zone is None:
@@ -67,7 +69,6 @@ class WorkspaceIL:
         self.cfg = cfg
         utils.set_seed_everywhere(cfg.seed)
         self.device = torch.device(cfg.device)
-        self.use_per = 'use_per' in self.cfg and self.cfg.use_per
         self.setup()
         
         if cfg.suite.name == 'atari':
@@ -75,22 +76,14 @@ class WorkspaceIL:
 
         self.agent = make_agent(self.train_env.observation_spec(),
                                 self.train_env.action_spec(), cfg.agent)
-        if self.use_per:
-            self.agent.use_per = True
 
-        if repr(self.agent) == 'drqv2':
-            self.cfg.suite.num_train_frames = self.cfg.num_train_frames_drq
         if repr(self.agent) == 'bc':
             self.cfg.suite.num_train_frames = self.cfg.num_train_frames_bc
             self.cfg.suite.num_seed_frames = 0
 
         self.expert_replay_loader = make_expert_replay_loader(
             self.cfg.expert_dataset, self.cfg.batch_size, self.cfg.num_demos, self.cfg.obs_type)
-        # self.expert_replay_loader = make_expert_replay_loader(
-        #     self.cfg.expert_dataset, self.cfg.batch_size, self.cfg.num_demos, self.cfg.obs_type)
         self.expert_replay_iter = iter(self.expert_replay_loader)
-
-        self.use_gt_rew = 'use_gt_rew' in self.cfg and self.cfg.use_gt_rew
             
         self.timer = utils.Timer()
         self._global_step = 0
@@ -99,10 +92,6 @@ class WorkspaceIL:
         self.noise_zone = None
         self.noise_scale = 0.1
         self.noise_size = 3
-        if 'noise_zone' in self.cfg:
-            self.noise_zone = self.cfg.noise_zone
-            self.noise_scale = self.cfg.noise_scale
-            self.noise_size = self.cfg.noise_size
 
         with open(self.cfg.expert_dataset, 'rb') as f:
             if self.cfg.obs_type == 'pixels':
@@ -110,11 +99,7 @@ class WorkspaceIL:
             elif self.cfg.obs_type == 'features':
                 _, self.expert_demo, _, self.expert_reward = pickle.load(f)
         self.expert_demo = self.expert_demo[:self.cfg.num_demos]
-        # self.expert_demo_trans = np.array([np.concatenate([_[:-1], _[1:]], axis=1) for _ in self.expert_demo])
-        # self.expert_demo_trans = np.reshape(self.expert_demo_trans, (-1, *self.expert_demo_trans.shape[2:]))
         print(np.mean([np.sum(_) for _ in self.expert_reward]), np.std([np.sum(_) for _ in self.expert_reward]))
-        # print(np.mean(np.sum(self.expert_reward, axis=1)), np.std(np.sum(self.expert_reward, axis=1)))
-        # exit(0)
         self.expert_reward = np.mean([np.mean(_) for _ in self.expert_reward[:self.cfg.num_demos]])
 
     def setup(self):
@@ -139,7 +124,7 @@ class WorkspaceIL:
         self.replay_loader, self.replay_buf = make_replay_loader(
             self.work_dir / 'buffer', self.cfg.replay_buffer_size,
             self.cfg.batch_size, self.cfg.replay_buffer_num_workers,
-            self.cfg.suite.save_snapshot, self.cfg.nstep, self.cfg.suite.discount, use_per=self.use_per)
+            self.cfg.suite.save_snapshot, self.cfg.nstep, self.cfg.suite.discount)
         
         self.initial_buffer = InitialBuffer(
                 self.cfg.expert_dataset, self.cfg.num_demos, self.cfg.obs_type, self.cfg.nstep)
@@ -212,20 +197,12 @@ class WorkspaceIL:
             episode += 1
             if self.video_recorder:
                 self.video_recorder.save(f'{self.global_frame}.mp4')
-            if self.cfg.suite.name == 'openaigym':
-                paths.append(time_step.observation['goal_achieved'])
-            elif self.cfg.suite.name == 'metaworld':
-                paths.append(1 if np.sum(path)>10 else 0)
         
         with self.logger.log_and_dump_ctx(self.global_frame, ty='eval') as log:
             log('episode_reward', total_reward / episode)
             log('episode_length', step * self.cfg.suite.action_repeat / episode)
             log('episode', self.global_episode)
             log('step', self.global_step)
-            if repr(self.agent) != 'drqv2':
-                log('expert_reward', self.expert_reward)
-            if self.cfg.suite.name == 'openaigym' or self.cfg.suite.name == 'metaworld':
-                log("success_percentage", np.mean(paths))
 
     def train_il(self):
         # predicates
@@ -252,13 +229,6 @@ class WorkspaceIL:
         observations.append(time_step.observation[self.cfg.obs_type])
         actions.append(time_step.action)
         
-        if repr(self.agent) == 'potil':
-            if self.agent.auto_rew_scale:
-                self.agent.sinkhorn_rew_scale = 1.  # Set after first episode
-
-        if self.cfg.bc_regularize:
-            print("Using BC regularization!!!")
-        
         if self.train_video_recorder:
             self.train_video_recorder.init(time_step.observation[self.cfg.obs_type])
         metrics = None
@@ -273,34 +243,15 @@ class WorkspaceIL:
                 actions = np.stack(actions, 0)
 
                 # Set new rewards
-                if not self.use_gt_rew:
-                    if repr(self.agent) == 'potil':
-                        new_rewards = self.agent.ot_rewarder(
-                            observations, self.expert_demo, self.global_step)
-                        new_rewards_sum = np.sum(new_rewards)
-                    elif repr(self.agent) == 'dac':
-                        new_rewards = self.agent.dac_rewarder(observations, actions).flatten().detach().cpu().numpy()
+                new_rewards = self.agent.dac_rewarder(observations, actions).flatten().detach().cpu().numpy()
 
-                        new_rewards_sum = np.sum(new_rewards)
-                        if len(new_rewards.shape) >= 2:
-                            new_rewards_sum = np.sum(new_rewards.mean(axis=1))
+                new_rewards_sum = np.sum(new_rewards)
+                if len(new_rewards.shape) >= 2:
+                    new_rewards_sum = np.sum(new_rewards.mean(axis=1))
 
-                    if repr(self.agent) == 'potil':
-                        if self.agent.auto_rew_scale: 
-                            if self._global_episode == 1:
-                                self.agent.sinkhorn_rew_scale = self.agent.sinkhorn_rew_scale * self.agent.auto_rew_scale_factor / float(
-                                    np.abs(new_rewards_sum))
-                                new_rewards = self.agent.ot_rewarder(
-                                    observations, self.expert_demo, self.global_step)
-                                new_rewards_sum = np.sum(new_rewards)
-                    
                 for i, elt in enumerate(time_steps):
                     elt = elt._replace(
                         observation=time_steps[i].observation[self.cfg.obs_type])
-                    # Set new rewards
-                    if not self.use_gt_rew:
-                        if repr(self.agent) == 'potil' or repr(self.agent) == 'dac':
-                                elt = elt._replace(reward=new_rewards[i])
                     self.replay_storage.add(elt)
 
                 # update initial buffer
@@ -325,8 +276,8 @@ class WorkspaceIL:
                         log('initial_buffer_size', self.initial_buffer.size())
                         log('seed',self.cfg.seed)
                         log('step', self.global_step)
-                        if repr(self.agent) == 'potil' or repr(self.agent) == 'dac' and not self.use_gt_rew:
-                                log('expert_reward', self.expert_reward)
+                        if repr(self.agent) == 'potil' or repr(self.agent) == 'dac':
+                                # log('expert_reward', self.expert_reward)
                                 log('imitation_reward', new_rewards_sum)
 
                 # reset env
@@ -366,25 +317,9 @@ class WorkspaceIL:
             # try to update the agent
             if not seed_until_step(self.global_step):
                 # Update
-                exp_demo = None
-                if ("use_simreg" in self.cfg.agent) and (self.cfg.agent.use_simreg):
-                    idx = random.randint(0, self.cfg.num_demos-1)
-                    exp_demo = self.expert_demo[idx] # self.expert_demo_trans
-                metrics = self.agent.update(self.replay_iter, self.expert_replay_iter, self.initial_iter,
-                                            self.global_step, self.cfg.bc_regularize, exp_demo, update_disc=(not self.use_gt_rew))
+                metrics = self.agent.update(self.replay_iter, self.expert_replay_iter, self.initial_iter, self.global_step)
                 
-                if self.use_per and len(metrics.keys()):
-                    self.replay_buf.update(metrics['tree_indices'], metrics['td_errors'])
-                    metrics.pop("tree_indices", None)
-                    metrics.pop("td_errors", None)
                 self.logger.log_metrics(metrics, self.global_frame, ty='train')
-
-                # get image of expert demo [0]
-                # if "dac" == repr(self.agent) and "patch" in self.agent.disc_type:
-                #     if self.global_step % 10000 == 0:
-                #         reward_logits = self.agent.dac_rewarder(self.expert_demo[0][:30], return_logits=True)
-                #         for exp_step in range(30):
-                #             self.logger.log_image("train_rew_img_{}".format(exp_step), reward_logits[exp_step], self.global_step)
 
             # take env step
             time_step = self.train_env.step(action)
@@ -431,12 +366,6 @@ def main(cfg):
     workspace = W(cfg)
     
     # Load weights
-    if cfg.load_bc:
-        snapshot = Path(cfg.bc_weight)
-        if snapshot.exists():
-            print(f'resuming bc: {snapshot}')
-            workspace.load_snapshot(snapshot)
-    
     if 'resume_exp' in cfg and cfg.resume_exp:
         print(f'resuming exp')
         snapshot = workspace.work_dir / 'snapshot.pt'

@@ -1,7 +1,7 @@
 defaults:
   - _self_
-  - agent: potil
-  - suite: dmc
+  - agent: encirl
+  - suite: atari
   - override hydra/launcher: submitit_local
 
 # Root Dir
@@ -19,31 +19,17 @@ device: cuda
 save_video: true
 save_train_video: false
 use_tb: true
-algo_name: 'patchgail'
+algo_name: 'encirl'
 record_video: false
 
 # experiment
 obs_type: 'pixels' # pixels, features
 reward_type: 'airl' # airl, gail, gail2
-experiment: ${suite.name}_${obs_type}_${task_name}/${algo_name}_rewscale_${reward_scale}_numtraj_${num_demos}/eta=${agent.eta}&mix_td=${agent.mix_td}/seed=${seed}/
+experiment: ${suite.name}_${obs_type}_${task_name}/${algo_name}_numtraj_${num_demos}/eta=${agent.eta}&mix_td=${agent.mix_td}/seed=${seed}/
 
 # expert dataset
-num_demos: 10 #50(openaigym), 10(dmc), 1(metaworld), 1(particle), 1(robotgym)
+num_demos: 20 #50(openaigym), 10(dmc), 1(metaworld), 1(particle), 1(robotgym)
 expert_dataset: '${root_dir}/PatchAIL/expert_demos/${suite.name}/${task_name}/expert_demos.pkl'
-
-# Load weights
-load_bc: false
-
-# Weights
-bc_weight: '${root_dir}/PatchIRL/weights/${suite.name}_${obs_type}/${task_name}/bc.pt'
-
-# Train with BC loss
-bc_regularize: false
-bc_weight_type: 'linear' # linear, qfilter
-bc_weight_schedule: 'linear(1.0,0.01,400000)'
-
-# Reward scale
-reward_scale: 1.0
 
 hydra:
   run:

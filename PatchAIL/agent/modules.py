@@ -18,76 +18,40 @@ import torch
 import utils
 
 
-# class AtariQNetwork(SoftQNetwork):
-#     def __init__(self, obs_dim, action_dim, args, device='cpu', input_dim=(84, 84)):
-#         super(AtariQNetwork, self).__init__(obs_dim, action_dim, args, device)
-#         self.frames = 4
-#         self.n_outputs = action_dim
-
-#         # CNN modeled off of Mnih et al.
-#         self.cnn = nn.Sequential(
-#             nn.Conv2d(self.frames, 32, kernel_size=8, stride=4),
-#             nn.ReLU(),
-#             nn.Conv2d(32, 64, kernel_size=4, stride=2),
-#             nn.ReLU(),
-#             nn.Conv2d(64, 64, kernel_size=3, stride=1),
-#             nn.ReLU()
-#         )
-
-#         self.fc_layer_inputs = self.cnn_out_dim(input_dim)
-
-#         self.fully_connected = nn.Sequential(
-#             nn.Linear(self.fc_layer_inputs, 512, bias=True),
-#             nn.ReLU(),
-#             nn.Linear(512, self.n_outputs))
-
-#     def cnn_out_dim(self, input_dim):
-#         return self.cnn(torch.zeros(1, self.frames, *input_dim)
-#                         ).flatten().shape[0]
-
-#     def _forward(self, x, *args):
-#         cnn_out = self.cnn(x).reshape(-1, self.fc_layer_inputs)
-#         return self.fully_connected(cnn_out)
-    
-    
 class DiscreteCritic(nn.Module):
     def __init__(self, repr_dim, n_actions, feature_dim, hidden_dim):
         super().__init__()
 
-        self.fully_connected = nn.Sequential(
-            nn.Linear(repr_dim, 512, bias=True),
-            nn.ReLU(),
-            nn.Linear(512, n_actions))
-        
         self.trunk = nn.Identity()
+        self.linear = nn.Sequential(nn.Linear(repr_dim, feature_dim),
+                                   nn.LayerNorm(feature_dim), nn.Tanh())
+        self.fully_connected = nn.Sequential(
+            nn.Linear(feature_dim, hidden_dim, bias=True),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, n_actions))
+        
         self.apply(utils.weight_init)
 
     def forward(self, obs):
-        q = self.fully_connected(obs)
+        h = self.linear(obs)
+        q = self.fully_connected(h)
         return q
 
-class DiscreteActor(nn.Module):
-    def __init__(self, repr_dim, n_actions, feature_dim, hidden_dim, critic=None):
-        super().__init__()
-        self.trunk = nn.Sequential(nn.Linear(repr_dim, feature_dim),
-                                   nn.LayerNorm(feature_dim), nn.Tanh())
 
+class DiscreteActor(nn.Module):
+    def __init__(self, feature_dim, n_actions, hidden_dim):
+        super().__init__()
         self.policy = nn.Sequential(nn.Linear(feature_dim, hidden_dim),
                                     nn.ReLU(inplace=True),
                                     nn.Linear(hidden_dim, hidden_dim),
                                     nn.ReLU(inplace=True),
                                     nn.Linear(hidden_dim, n_actions),)
-
-        self.critic = critic
         self.apply(utils.weight_init)
 
     def forward(self, obs, return_action=False, *args, **kwargs):
         if self.critic is None:
             h = self.trunk(obs)
             actions = self.policy(h)
-            # dist = F.gumbel_softmax(actions, tau=1, hard=False)
-        else:
-            actions = self.critic(obs)
             
         dist = utils.MultiNomial(actions)
 
@@ -97,12 +61,8 @@ class DiscreteActor(nn.Module):
         return dist
 
 class Actor(nn.Module):
-    def __init__(self, repr_dim, action_shape, feature_dim, hidden_dim):
+    def __init__(self, feature_dim, action_shape, hidden_dim):
         super().__init__()
-
-        self.trunk = nn.Sequential(nn.Linear(repr_dim, feature_dim),
-                                   nn.LayerNorm(feature_dim), nn.Tanh())
-
         self.policy = nn.Sequential(nn.Linear(feature_dim, hidden_dim),
                                     nn.ReLU(inplace=True),
                                     nn.Linear(hidden_dim, hidden_dim),
@@ -112,9 +72,7 @@ class Actor(nn.Module):
         self.apply(utils.weight_init)
 
     def forward(self, obs, std):
-        h = self.trunk(obs)
-
-        mu = self.policy(h)
+        mu = self.policy(obs)
         mu = torch.tanh(mu)
         std = torch.ones_like(mu) * std
 
@@ -123,11 +81,8 @@ class Actor(nn.Module):
 
 
 class Critic(nn.Module):
-    def __init__(self, repr_dim, action_shape, feature_dim, hidden_dim):
+    def __init__(self, feature_dim, action_shape, hidden_dim):
         super().__init__()
-
-        self.trunk = nn.Sequential(nn.Linear(repr_dim, feature_dim),
-                                   nn.LayerNorm(feature_dim), nn.Tanh())
 
         self.Q1 = nn.Sequential(
             nn.Linear(feature_dim + action_shape[0], hidden_dim),

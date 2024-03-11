@@ -19,26 +19,25 @@ import torch.nn.functional as F
 import utils
 
 try:
-    from vit_pytorch import SimpleViT
-    from vit_pytorch.simple_vit import posemb_sincos_2d
     from einops import rearrange, repeat
 except:
     print("cannot import vit_pytorch")
 
+
 class Discriminator(nn.Module):
-    def __init__(self, in_dim, hid_dim):
+    def __init__(self, in_dim):
         super().__init__()
 
         self.fully_connected = nn.Sequential(
             nn.Linear(in_dim, 512, bias=True),
             nn.ReLU(),
             nn.Linear(512, 1))
-
         self.apply(utils.weight_init)
 
     def forward(self, obs):
         q = self.fully_connected(obs)
         return q
+
 
 class WeightedFeatureDiscriminator(nn.Module):
     def __init__(self, in_dim):
@@ -63,6 +62,7 @@ class WeightedFeatureDiscriminator(nn.Module):
         res = res.sum(dim=1) # (B, repr_dim)
         res = self.trunk(res) # (B, 1)
         return res
+
 
 class AtariPatchDiscriminator(nn.Module):
     """Defines a PatchGAN discriminator for Atari games"""

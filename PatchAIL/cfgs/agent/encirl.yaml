@@ -10,19 +10,14 @@ update_every_steps: 2
 use_tb: ${use_tb}
 num_expl_steps: 2000
 hidden_dim: ${suite.hidden_dim}
-feature_dim: 50
+feature_dim: 3136
 stddev_schedule: 'linear(1.0,0.1,500000)' #0.1
 stddev_clip: 0.3
+init_temp: 0.01
 augment: True
 use_actions: false
 suite_name: ${suite.name}
 obs_type: ${obs_type}
-bc_weight_type: ${bc_weight_type}
-bc_weight_schedule: ${bc_weight_schedule}
-reward_type: ${reward_type}
-disc_type: 'encoder'
 state_trans: true
-reward_scale: ${reward_scale}
-share_encoder: true
 eta: 0
-mix_td: true
+mix_td: false
