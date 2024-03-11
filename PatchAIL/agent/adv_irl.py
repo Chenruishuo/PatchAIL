@@ -100,7 +100,7 @@ class DACAgent:
         self.target_enc = target_enc
         self.augment = augment and self.use_encoder
         if disc_lr is None:
-            disc_lr = lr
+            disc_lr = lr * 10
 
         self.state_trans = state_trans
         self.grad_pen_weight = grad_pen_weight

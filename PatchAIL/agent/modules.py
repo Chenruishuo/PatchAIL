@@ -24,7 +24,7 @@ class DiscreteCritic(nn.Module):
 
         self.trunk = nn.Identity()
         self.linear = nn.Sequential(nn.Linear(repr_dim, feature_dim),
-                                   nn.LayerNorm(feature_dim), nn.Tanh())
+                                   nn.LayerNorm(feature_dim), nn.ReLU())
         self.fully_connected = nn.Sequential(
             nn.Linear(feature_dim, hidden_dim, bias=True),
             nn.ReLU(),
@@ -37,28 +37,6 @@ class DiscreteCritic(nn.Module):
         q = self.fully_connected(h)
         return q
 
-
-class DiscreteActor(nn.Module):
-    def __init__(self, feature_dim, n_actions, hidden_dim):
-        super().__init__()
-        self.policy = nn.Sequential(nn.Linear(feature_dim, hidden_dim),
-                                    nn.ReLU(inplace=True),
-                                    nn.Linear(hidden_dim, hidden_dim),
-                                    nn.ReLU(inplace=True),
-                                    nn.Linear(hidden_dim, n_actions),)
-        self.apply(utils.weight_init)
-
-    def forward(self, obs, return_action=False, *args, **kwargs):
-        if self.critic is None:
-            h = self.trunk(obs)
-            actions = self.policy(h)
-            
-        dist = utils.MultiNomial(actions)
-
-        if return_action:
-            return actions
-        
-        return dist
 
 class Actor(nn.Module):
     def __init__(self, feature_dim, action_shape, hidden_dim):

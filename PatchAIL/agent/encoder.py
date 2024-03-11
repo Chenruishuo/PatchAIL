@@ -58,9 +58,6 @@ class AtariEncoder(nn.Module):
                                      nn.ReLU(), nn.Conv2d(32, 64, 4, stride=2),
                                      nn.ReLU(), nn.Conv2d(64, 64, 3, stride=1),
                                      nn.ReLU())
-        
-        # self.trunk = nn.Sequential(nn.Linear(self.repr_dim, feature_dim),
-        #                            nn.LayerNorm(feature_dim), nn.Tanh())
 
         self.apply(utils.weight_init)
 
