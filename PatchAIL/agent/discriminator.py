@@ -197,40 +197,6 @@ class BigPatchDiscriminator(nn.Module):
         # h = h.view(h.shape[0], -1)
         return h
 
-class VitDiscriminator(nn.Module):
-    """Defines a ViT discriminator"""
-    def __init__(self, in_dim):
-        super().__init__()
-
-        self.repr_dim = 32 * 35 * 35
-
-        self.vit = SimpleViT(
-            image_size = 84,
-            channels = in_dim,
-            patch_size = 14,
-            num_classes = 1,
-            dim = 192,
-            depth = 12,
-            heads = 3,
-            mlp_dim = 192 * 4,
-        )
-        
-        self.apply(utils.weight_init)
-
-    def forward(self, obs):
-        obs = obs / 255.0 - 0.5
-
-        *_, h, w, dtype = *obs.shape, obs.dtype
-
-        x = self.vit.to_patch_embedding(obs)
-        pe = posemb_sincos_2d(x)
-        x = rearrange(x, 'b ... d -> b (...) d') + pe
-
-        x = self.vit.transformer(x)
-
-        x = self.vit.to_latent(x)
-        return self.vit.linear_head(x).squeeze()
-
 
 class DiscTrunk(nn.Module):
     def __init__(self, repr_dim, feature_dim):

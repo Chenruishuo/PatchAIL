@@ -5,7 +5,7 @@ defaults:
   - override hydra/launcher: submitit_local
 
 # Root Dir
-root_dir: '/home/ubuntu/zhangzhilong/crs/PatchAIL'
+root_dir: '/home/ubuntu/duxinghao/crs/PatchAIL'
 
 # replay buffer
 replay_buffer_size: 1000000 # 150000
@@ -25,7 +25,7 @@ record_video: false
 # experiment
 obs_type: 'pixels' # pixels, features
 reward_type: 'airl' # airl, gail, gail2
-experiment: ${suite.name}_${obs_type}_${task_name}/${algo_name}_numtraj_${num_demos}/eta=${agent.eta}&mix_td=${agent.mix_td}/seed=${seed}/
+experiment: eta=${agent.eta}&mix_td=${agent.mix_td}&argmax/seed=${seed}
 
 # expert dataset
 num_demos: 20 #50(openaigym), 10(dmc), 1(metaworld), 1(particle), 1(robotgym)
@@ -33,11 +33,11 @@ expert_dataset: '${root_dir}/PatchAIL/expert_demos/${suite.name}/${task_name}/ex
 
 hydra:
   run:
-    dir: ./exp_local/${suite.name}_${task_name}/${algo_name}_${num_demos}/${experiment}/${now:%Y.%m.%d}/${now:%H%M%S}
+    dir: ./exp_local/${suite.name}_${task_name}_${obs_type}/${experiment}/${now:%Y.%m.%d}/${now:%H%M%S}
   sweep:
-    dir: ./exp_local/${suite.name}_${task_name}/${algo_name}_${num_demos}/${now:%H%M%S}
+    dir: ./exp_local/${now:%H%M%S}
     subdir: ${hydra.job.num}
   launcher:
     tasks_per_node: 1
     nodes: 1
-    submitit_folder: ./exp/${suite.name}_${task_name}/${algo_name}_${num_demos}/${now:%H%M%S}_${experiment}/.slurm
+    submitit_folder: ./exp/${suite.name}_${task_name}/${now:%H%M%S}_${experiment}/.slurm

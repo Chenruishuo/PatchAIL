@@ -100,7 +100,7 @@ class DACAgent:
         self.target_enc = target_enc
         self.augment = augment and self.use_encoder
         if disc_lr is None:
-            disc_lr = lr * 10
+            disc_lr = lr
 
         self.state_trans = state_trans
         self.grad_pen_weight = grad_pen_weight
@@ -223,9 +223,13 @@ class DACAgent:
             next_obs = torch.cat([next_obs[:half_batch_size],expert_next_obs[:half_batch_size]],dim=0)
             reward = torch.cat((reward[:half_batch_size], expert_reward[:half_batch_size]),dim=0)
         with torch.no_grad():
-            next_Q= self.critic_target(next_obs)
-            next_V = self.alpha * torch.logsumexp(next_Q / self.alpha, dim=1, keepdim=True)
-            target_Q = reward + discount * next_V
+            dist = self.critic(next_obs)
+            next_action = dist.argmax(dim=-1)
+            target_Q = self.critic_target(next_obs)[range(len(obs)),next_action].unsqueeze(-1)
+            target_Q = reward + (discount * target_Q)
+            # next_Q= self.critic_target(next_obs)
+            # next_V = self.alpha * torch.logsumexp(next_Q / self.alpha, dim=1, keepdim=True)
+            # target_Q = reward + discount * next_V
         Q = self.critic(obs)[range(len(obs)), action.long()].unsqueeze(-1)
         critic_loss = F.mse_loss(Q, target_Q)
         

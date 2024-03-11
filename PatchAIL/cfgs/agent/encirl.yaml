@@ -5,6 +5,7 @@ action_shape: ??? # to be specified later
 n_actions: 0 # to be specified later
 device: ${device}
 lr: 1e-4
+disc_lr: 1e-3
 critic_target_tau: 0.01
 update_every_steps: 2
 use_tb: ${use_tb}

@@ -22,7 +22,6 @@ class DiscreteCritic(nn.Module):
     def __init__(self, repr_dim, n_actions, feature_dim, hidden_dim):
         super().__init__()
 
-        self.trunk = nn.Identity()
         self.linear = nn.Sequential(nn.Linear(repr_dim, feature_dim),
                                    nn.LayerNorm(feature_dim), nn.ReLU())
         self.fully_connected = nn.Sequential(
