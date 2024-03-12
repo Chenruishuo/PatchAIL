@@ -246,6 +246,23 @@ class DACAgent:
             expert_dist = self.critic(expert_obs)
             expert_Q = torch.gather(expert_dist, -1, expert_action.view(expert_action.shape[0],-1))
             optimistic_loss = -self._eta * (max_V+expert_Q).mean()/2
+        elif self.max_q_type == 'max_q_minus_v':
+            cat_obs = torch.cat([initial_obs, expert_obs],dim=0)
+            cat_V = self.alpha * torch.logsumexp(self.critic(cat_obs) / self.alpha, dim=1, keepdim=True).mean()
+            expert_dist = self.critic(expert_obs)
+            expert_Q = torch.gather(expert_dist, -1, expert_action.view(expert_action.shape[0],-1)).mean()
+            initial_dist = self.critic(initial_obs)
+            with torch.no_grad():
+                initial_action = torch.argmax(initial_dist,dim=-1)
+            initial_q = torch.gather(initial_dist, -1, initial_action.view(initial_action.shape[0],-1)).mean()
+            optimistic_loss = -self._eta * (expert_Q+initial_q - 2*cat_V)/2
+            # initial = torch.cat([initial_obs[:half_batch_size], expert_obs[:half_batch_size]],dim=0)
+            # dist_to_max = self.critic(obs_to_max)
+            # softmax_to_max = F.softmax(dist_to_max, dim=-1)
+            # with torch.no_grad():
+            #     pi_action_to_max = torch.multinomial(softmax_to_max, 1)
+            # pi_q_to_max = torch.gather(softmax_to_max, -1, pi_action_to_max)
+            # max_V = self.alpha * torch.logsumexp(self.critic(obs_to_max) / self.alpha, dim=1, keepdim=True)
         else:
             print("max_q_type not in list!")
 
